@@ -16,6 +16,18 @@ const money = value => new Intl.NumberFormat('pt-BR', { style: 'currency', curre
 const dateTime = value => new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short', timeZone: 'America/Sao_Paulo' }).format(new Date(value));
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 const initialSchedule = { mode: 'weekly', days: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'], date: today(), start: '08:00', end: '18:00' };
+const sessionKey = 'loop-session';
+const viewsByRole = { Driver: ['explore', 'bookings'], Owner: ['my-spots', 'bookings'], Admin: ['admin'] };
+
+function saveSession(user, view) {
+  if (user) sessionStorage.setItem(sessionKey, JSON.stringify({ userId: user.id, view }));
+  else sessionStorage.removeItem(sessionKey);
+}
+
+function readSession() {
+  try { return JSON.parse(sessionStorage.getItem(sessionKey) || 'null'); }
+  catch { saveSession(null); return null; }
+}
 
 function Brand({ small = false }) {
   return <div className={`brand ${small ? 'brand-small' : ''}`}><span className="brand-mark"><span /></span><span>loop<span className="brand-dot">.</span></span></div>;
@@ -47,8 +59,21 @@ function App() {
     setUsers(userData);
     setSpots(spotData);
     setBookings(bookingData);
+    return userData;
   };
-  useEffect(() => { refresh().catch(e => setError(e.message)).finally(() => setBusy(false)); }, []);
+  useEffect(() => {
+    refresh().then(userData => {
+      const saved = readSession();
+      if (!saved) return;
+      const savedUser = userData.find(u => u.id === saved.userId);
+      if (!savedUser) { saveSession(null); return; }
+      const allowedViews = viewsByRole[savedUser.role] || [];
+      const restoredView = allowedViews.includes(saved.view) ? saved.view : allowedViews[0] || 'explore';
+      setUser(savedUser);
+      setView(restoredView);
+      saveSession(savedUser, restoredView);
+    }).catch(e => setError(e.message)).finally(() => setBusy(false));
+  }, []);
   useEffect(() => { if (toast) { const timeout = setTimeout(() => setToast(''), 4200); return () => clearTimeout(timeout); } }, [toast]);
 
   const visibleSpots = useMemo(() => spots.filter(s => s.isActive).map(s => ({ ...s, distance: distanceKm(destination, { lat: s.latitude, lng: s.longitude }) }))
@@ -61,12 +86,14 @@ function App() {
     try {
       const created = await api('/api/users', { method: 'POST', body: signup });
       await refresh();
-      setUser(created); setView(created.role === 'Owner' ? 'my-spots' : 'explore'); setShowSignup(false); setToast('Perfil criado com sucesso!');
+      const nextView = created.role === 'Owner' ? 'my-spots' : 'explore';
+      setUser(created); setView(nextView); saveSession(created, nextView); setShowSignup(false); setToast('Perfil criado com sucesso!');
     } catch (e) { setError(e.message); }
   }
 
   function login(selected) {
-    setUser(selected); setView(selected.role === 'Owner' ? 'my-spots' : selected.role === 'Admin' ? 'admin' : 'explore'); setError('');
+    const nextView = viewsByRole[selected.role][0];
+    setUser(selected); setView(nextView); saveSession(selected, nextView); setError('');
   }
 
   async function saveSpot(payload, id) {
@@ -91,7 +118,7 @@ function App() {
     catch (e) { setError(e.message); }
   }
 
-  function navigation(target) { setView(target); setMobileMenu(false); setError(''); }
+  function navigation(target) { setView(target); saveSession(user, target); setMobileMenu(false); setError(''); }
 
   if (busy) return <div className="loading-page"><Brand /><div className="spinner" />Carregando o Loop...</div>;
 
@@ -107,7 +134,7 @@ function App() {
   const navItems = user.role === 'Driver' ? [['explore', 'Explorar vagas', Search], ['bookings', 'Minhas reservas', CalendarDays]] : user.role === 'Owner' ? [['my-spots', 'Minhas vagas', ParkingSquare], ['bookings', 'Reservas', CalendarDays]] : [['admin', 'Visão geral', LayoutDashboard]];
 
   return <div className="app-shell">
-    <aside className={`sidebar ${mobileMenu ? 'sidebar-open' : ''}`}><div className="sidebar-top"><Brand small /><button className="mobile-close" onClick={() => setMobileMenu(false)} aria-label="Fechar menu"><X size={20} /></button></div><div className="sidebar-label">MENU PRINCIPAL</div><nav>{navItems.map(([id, label, Icon]) => <button key={id} className={`nav-item ${view === id ? 'active' : ''}`} onClick={() => navigation(id)}><Icon size={19} /><span>{label}</span>{view === id && <span className="nav-active-dot" />}</button>)}</nav><div className="sidebar-bottom"><div className="sidebar-tip"><span className="tip-icon"><MapPin size={19} /></span><strong>Mais espaço para todos.</strong><p>Conectando pessoas e lugares na cidade.</p></div><button className="account-card" onClick={() => { setUser(null); setSelectedSpot(null); setOwnerForm(null); }}><span className="avatar">{user.name.charAt(0).toUpperCase()}</span><span><strong>{user.name}</strong><small>{roleText[user.role]}</small></span><LogOut size={17} /></button></div></aside>
+    <aside className={`sidebar ${mobileMenu ? 'sidebar-open' : ''}`}><div className="sidebar-top"><Brand small /><button className="mobile-close" onClick={() => setMobileMenu(false)} aria-label="Fechar menu"><X size={20} /></button></div><div className="sidebar-label">MENU PRINCIPAL</div><nav>{navItems.map(([id, label, Icon]) => <button key={id} className={`nav-item ${view === id ? 'active' : ''}`} onClick={() => navigation(id)}><Icon size={19} /><span>{label}</span>{view === id && <span className="nav-active-dot" />}</button>)}</nav><div className="sidebar-bottom"><div className="sidebar-tip"><span className="tip-icon"><MapPin size={19} /></span><strong>Mais espaço para todos.</strong><p>Conectando pessoas e lugares na cidade.</p></div><button className="account-card" onClick={() => { saveSession(null); sessionStorage.removeItem('loop-admin-tab'); setUser(null); setSelectedSpot(null); setOwnerForm(null); }}><span className="avatar">{user.name.charAt(0).toUpperCase()}</span><span><strong>{user.name}</strong><small>{roleText[user.role]}</small></span><LogOut size={17} /></button></div></aside>
     {mobileMenu && <div className="mobile-overlay" onClick={() => setMobileMenu(false)} />}
     <main className="main"><header className="topbar"><button className="menu-button" onClick={() => setMobileMenu(true)} aria-label="Abrir menu"><Menu size={22} /></button><div className="breadcrumb">Loop <span>/</span> {navItems.find(x => x[0] === view)?.[1]}</div><div className="topbar-right"><span className="topbar-pill"><span className="online-dot" /> Plataforma ativa</span><span className="avatar top-avatar">{user.name.charAt(0).toUpperCase()}</span></div></header>
       {error && <div className="alert error-alert page-alert">{error}<button aria-label="Fechar erro" onClick={() => setError('')}><X size={16} /></button></div>}
@@ -264,7 +291,11 @@ function BookingsView({ bookings, role, onCancel }) {
 }
 
 function AdminDashboard({ users, spots, bookings }) {
-  const [tab, setTab] = useState('spots');
+  const [tab, setTab] = useState(() => {
+    const saved = sessionStorage.getItem('loop-admin-tab');
+    return ['spots', 'users', 'bookings'].includes(saved) ? saved : 'spots';
+  });
+  useEffect(() => { sessionStorage.setItem('loop-admin-tab', tab); }, [tab]);
   return <div className="page-content"><div className="page-heading"><div><div className="eyebrow">PAINEL ADMINISTRATIVO</div><h1>Visão geral<span>.</span></h1><p>Um panorama simples da atividade da plataforma.</p></div><span className="heading-stamp"><ShieldCheck size={17} /> Acesso administrativo</span></div><div className="stat-grid"><Stat icon={UserRound} label="Usuários" value={users.length} /><Stat icon={ParkingSquare} label="Vagas ativas" value={spots.filter(s => s.isActive).length} /><Stat icon={CalendarDays} label="Reservas" value={bookings.length} /></div><div className="admin-table"><div className="table-tabs">{[['spots', 'Vagas'], ['users', 'Usuários'], ['bookings', 'Reservas']].map(([id, label]) => <button key={id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>{label}</button>)}</div><div className="table-scroll"><table><thead><tr>{(tab === 'spots' ? ['Vaga', 'Proprietário', 'Preço', 'Status'] : tab === 'users' ? ['Nome', 'E-mail', 'Perfil'] : ['Vaga', 'Motorista', 'Entrada', 'Valor', 'Status']).map(label => <th key={label}>{label}</th>)}</tr></thead><tbody>{tab === 'spots' ? spots.map(s => <tr key={s.id}><td><strong>{s.title}</strong><small>{s.address}</small></td><td>{s.ownerName}</td><td>{money(s.price)} {pricingText[s.pricingType]}</td><td><span className={`table-status ${s.isActive ? '' : 'muted'}`}>{s.isActive ? 'Ativa' : 'Desativada'}</span></td></tr>) : tab === 'users' ? users.map(u => <tr key={u.id}><td><strong>{u.name}</strong></td><td>{u.email}</td><td>{roleText[u.role]}</td></tr>) : bookings.map(b => <tr key={b.id}><td><strong>{b.spotTitle}</strong></td><td>{b.driverName}</td><td>{dateTime(b.startsAtUtc)}</td><td>{money(b.total)}</td><td><span className={`table-status ${b.status === 'Cancelled' ? 'muted' : ''}`}>{b.status === 'Cancelled' ? 'Cancelada' : 'Confirmada'}</span></td></tr>)}</tbody></table>{!(tab === 'spots' ? spots : tab === 'users' ? users : bookings).length && <div className="table-empty">Nenhum registro encontrado.</div>}</div></div></div>;
 }
 
