@@ -130,7 +130,6 @@ app.MapPost("/api/bookings", async (CreateBookingRequest request, AppDbContext d
     var driver = await db.Users.FindAsync(request.DriverId);
     if (driver?.Role != UserRole.Driver) return Results.BadRequest(new { error = "Selecione um motorista válido." });
 
-    // Serializable faz duas reservas simultâneas para a mesma vaga conflitarem no PostgreSQL.
     await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
     try
     {
@@ -215,7 +214,6 @@ static void ApplySpot(ParkingSpot spot, SaveSpotRequest request)
 
 static bool FitsAvailability(ParkingSpot spot, DateTime startUtc, DateTime endUtc)
 {
-    // O projeto usa o fuso fixo de Brasília. Horários entre dias são verificados dia a dia.
     var zone = TimeZoneInfo.FindSystemTimeZoneById("America/Sao_Paulo");
     var localStart = TimeZoneInfo.ConvertTimeFromUtc(startUtc, zone);
     var localEnd = TimeZoneInfo.ConvertTimeFromUtc(endUtc, zone);
@@ -234,7 +232,6 @@ static bool FitsAvailability(ParkingSpot spot, DateTime startUtc, DateTime endUt
         {
             if (window.StartTime.ToTimeSpan() > coveredUntil) break;
             var windowEnd = window.EndTime.ToTimeSpan();
-            // A interface trabalha com minutos; 23:59 representa o fim do dia.
             if (windowEnd == new TimeSpan(23, 59, 0)) windowEnd = TimeSpan.FromDays(1);
             if (windowEnd > coveredUntil) coveredUntil = windowEnd;
         }
